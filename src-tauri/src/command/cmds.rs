@@ -12,6 +12,7 @@ use std::io::Write;
 use std::net::TcpListener;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::WindowEvent;
@@ -20,6 +21,7 @@ use tauri::{
 };
 use tauri_plugin_http::reqwest;
 use tauri_plugin_notification::NotificationExt;
+use tokio::time::{sleep, Duration};
 use walkdir::WalkDir;
 use warp::Filter;
 use zip::write::FileOptions;
@@ -729,6 +731,21 @@ pub fn get_www_dir(base_dir: &str) -> Result<String, io::Error> {
     Ok(String::new())
 }
 
+// get config custom js
+#[tauri::command]
+pub fn get_config_js(base_dir: &str) -> Result<String, io::Error> {
+    let mut config_dir = PathBuf::from(base_dir);
+    config_dir.push("config");
+    config_dir.push("inject");
+    config_dir.push("custom.js");
+    if fs::metadata(&config_dir).is_ok() {
+        let content = fs::read_to_string(&config_dir)?;
+        Ok(content)
+    } else {
+        Ok(String::new())
+    }
+}
+
 #[tauri::command]
 pub fn get_env_var(name: String) -> Result<String, String> {
     std::env::var(name).map_err(|e| e.to_string())
@@ -741,89 +758,255 @@ pub fn find_port() -> Result<u16, String> {
     Ok(port)
 }
 
+// copy dir all
 #[tauri::command]
-pub fn windows_build(base_dir: &str, exe_name: &str, config: String) -> Result<(), String> {
+pub fn copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
+    if !dst.exists() {
+        fs::create_dir_all(dst).expect("create dst dir failed");
+    }
+    for entry in fs::read_dir(src).expect("read src dir failed") {
+        let entry = entry.expect("read src dir entry failed");
+        let ty = entry.file_type().expect("read src dir entry file type failed");
+        if ty.is_dir() {
+            copy_dir(&entry.path(), &dst.join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dst.join(entry.file_name()))
+                .expect("copy file failed");
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn windows_build(
+    base_dir: &str,
+    exe_name: &str,
+    config: String,
+    base64_png: String,
+    custom_js: String,
+    html_path: String,
+) -> Result<(), String> {
     let base_path = Path::new(base_dir).join(exe_name);
     if !base_path.exists() {
         fs::create_dir_all(&base_path).map_err(|e| e.to_string())?;
     }
+    // config_dir
+    let config_dir = base_path.join("config").join("inject");
+    if !config_dir.exists() {
+        fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+    }
+    // www dir
+    let www_dir = base_path.join("config").join("www");
+    if !html_path.is_empty() {
+        let html_dir = Path::new(&html_path);
+        if html_dir.exists() {
+            copy_dir(html_dir, &www_dir).expect("copy html dir failed");
+        }
+    }
+    // custom js
+    let custom_js_path = config_dir.join("custom.js");
+    fs::write(custom_js_path, custom_js).map_err(|e| e.to_string())?;
     let target_exe_path = base_path.join(format!("{}.exe", exe_name));
     let exe_path = env::current_exe().unwrap();
     fs::copy(exe_path, target_exe_path).map_err(|e| e.to_string())?;
-    let config_dir = base_path.join("config");
-    if !config_dir.exists() {
-        fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
-    }
-    let man_path = config_dir.join("man");
+    let man_path = base_path.join("config").join("man");
     fs::write(man_path, config).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn macos_build(base_dir: &str, exe_name: &str, config: String) -> Result<(), String> {
+pub async fn macos_build(
+    base_dir: &str,
+    exe_name: &str,
+    config: String,
+    base64_png: String,
+    custom_js: String,
+    html_path: String,
+) -> Result<(), String> {
+    // if dev, need create Info.plist file in target dir
     let base_path = Path::new(base_dir).join(exe_name);
     let app_dir = base_path.join("Contents");
     if !app_dir.exists() {
-        fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&app_dir).expect("create app dir failed");
     }
-    let macos_dir = base_path.join("Contents/MacOS");
-    let config_dir = base_path.join("Contents/MacOS/config");
+    sleep(Duration::from_secs(10)).await;
+    let config_dir = base_path.join("Contents/MacOS/config/inject");
     let resources_dir = base_path.join("Contents/Resources");
-    if !macos_dir.exists() {
-        fs::create_dir_all(&macos_dir).map_err(|e| e.to_string())?;
-    }
     if !config_dir.exists() {
-        fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&config_dir).expect("create config dir failed");
     }
     if !resources_dir.exists() {
-        fs::create_dir_all(&resources_dir).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&resources_dir).expect("create resources dir failed");
     }
+    // copy html
+    let www_dir = base_path.join("Contents/MacOS/config/www");
+    if !html_path.is_empty() {
+        let html_dir = Path::new(&html_path);
+        if html_dir.exists() {
+            copy_dir(html_dir, &www_dir).expect("copy html dir failed");
+        }
+    }
+    sleep(Duration::from_secs(10)).await;
+    // custom js
+    let custom_js_path = config_dir.join("custom.js");
+    fs::write(custom_js_path, custom_js).expect("write custom.js failed");
     let exe_path = env::current_exe().unwrap();
     let exe_dir = exe_path.parent().unwrap();
     let exe_parent_dir = exe_dir.parent().unwrap();
-    let info_plist_source = exe_parent_dir.join("Contents/Info.plist");
+    let info_plist_source = exe_parent_dir.join("Info.plist");
     let info_plist_target = base_path.join("Contents/Info.plist");
-    fs::copy(&info_plist_source, &info_plist_target).map_err(|e| e.to_string())?;
+    fs::copy(&info_plist_source, &info_plist_target).expect("copy info.plist failed");
     let pakeplus_app_source = exe_dir.join("PakePlus");
     let pakeplus_app_target = base_path.join("Contents/MacOS/PakePlus");
-    fs::copy(&pakeplus_app_source, &pakeplus_app_target).map_err(|e| e.to_string())?;
+    fs::copy(&pakeplus_app_source, &pakeplus_app_target).expect("copy pakeplus app failed");
+    sleep(Duration::from_secs(10)).await;
     let man_path = base_path.join("Contents/MacOS/config/man");
-    fs::write(man_path, config).map_err(|e| e.to_string())?;
+    fs::write(man_path, config).expect("write man failed");
+    // creat icns
+    let _ = png_to_icns(
+        base64_png.replace("data:image/png;base64,", ""),
+        resources_dir.to_str().unwrap().to_string(),
+    )
+    .expect("convert png to icns failed");
+    let base_app = Path::new(base_dir).join(format!("{}.app", exe_name));
+    // if base_app exists, delete it
+    if base_app.exists() {
+        fs::remove_dir_all(&base_app).expect("delete old app failed");
+    }
+    fs::rename(base_path, base_app).expect("rename app failed");
     Ok(())
 }
 
 #[tauri::command]
-pub fn linux_build(base_dir: &str, exe_name: &str, config: String) -> Result<(), String> {
+pub async fn linux_build(
+    base_dir: &str,
+    exe_name: &str,
+    config: String,
+    base64_png: String,
+    custom_js: String,
+    html_path: String,
+) -> Result<(), String> {
     Ok(())
 }
 
 #[tauri::command]
-pub fn build_local(
+pub async fn build_local(
     handle: AppHandle,
     target_dir: &str,
     exe_name: &str,
     config: WindowConfig,
+    base64_png: String,
+    debug: bool,
+    custom_js: String,
+    html_path: String,
 ) -> Result<(), String> {
+    handle.emit("local-progress", "10").unwrap();
     let resource_path = handle
         .path()
         .resolve("data/man.json", BaseDirectory::Resource)
         .expect("failed to resolve resource");
-    let man_json = fs::read_to_string(&resource_path).map_err(|e| e.to_string())?;
+    handle.emit("local-progress", "20").unwrap();
+    let man_json = fs::read_to_string(&resource_path).expect("read man.json failed");
+    handle.emit("local-progress", "30").unwrap();
     let mut man_json =
-        serde_json::from_str::<serde_json::Value>(&man_json).map_err(|e| e.to_string())?;
+        serde_json::from_str::<serde_json::Value>(&man_json).expect("parse man.json failed");
     man_json["window"] = serde_json::to_value(config).unwrap();
+    man_json["debug"] = serde_json::to_value(debug).unwrap();
     let man_json_base64 = BASE64_STANDARD.encode(man_json.to_string());
+    handle.emit("local-progress", "40").unwrap();
     #[cfg(target_os = "windows")]
-    {
-        windows_build(target_dir, exe_name, man_json_base64).map_err(|e| e.to_string())?;
-    }
+    windows_build(
+        target_dir,
+        exe_name,
+        man_json_base64,
+        base64_png,
+        custom_js,
+        html_path,
+    )
+    .await?;
+    handle.emit("local-progress", "60").unwrap();
     #[cfg(target_os = "macos")]
-    {
-        macos_build(target_dir, exe_name, man_json_base64).map_err(|e| e.to_string())?;
-    }
+    macos_build(
+        target_dir,
+        exe_name,
+        man_json_base64,
+        base64_png,
+        custom_js,
+        html_path,
+    )
+    .await?;
+    handle.emit("local-progress", "80").unwrap();
     #[cfg(target_os = "linux")]
-    {
-        linux_build(target_dir, exe_name, man_json_base64).map_err(|e| e.to_string())?;
+    linux_build(
+        target_dir,
+        exe_name,
+        man_json_base64,
+        base64_png,
+        custom_js,
+        html_path,
+    )
+    .await?;
+    handle.emit("local-progress", "100").unwrap();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn png_to_icns(base64_png: String, output_dir: String) -> Result<(), String> {
+    let iconset_path = format!("{}/temp.iconset", output_dir);
+    if Path::new(&iconset_path).exists() {
+        fs::remove_dir_all(&iconset_path)
+            .map_err(|e| format!("delete old iconset dir failed: {}", e))?;
     }
+    fs::create_dir_all(&iconset_path).map_err(|e| format!("create iconset dir failed: {}", e))?;
+    let png_data = BASE64_STANDARD
+        .decode(&base64_png)
+        .map_err(|e| format!("decode base64 png failed: {}", e))?;
+    let input_png_path = format!("{}/icon.png", output_dir);
+    let mut png_file =
+        File::create(&input_png_path).map_err(|e| format!("write png failed: {}", e))?;
+    png_file
+        .write_all(&png_data)
+        .map_err(|e| format!("write png content failed: {}", e))?;
+    let sizes = vec![16, 32, 128, 256, 512];
+    for size in sizes {
+        let double = size * 2;
+        let filename = format!("{}/icon_{}x{}.png", iconset_path, size, size);
+        let filename2x = format!("{}/icon_{}x{}@2x.png", iconset_path, size, size);
+        let status1 = Command::new("sips")
+            .args([
+                "-z",
+                &size.to_string(),
+                &size.to_string(),
+                &input_png_path,
+                "--out",
+                &filename,
+            ])
+            .status()
+            .map_err(|e| format!("execute sips failed: {}", e))?;
+        let status2 = Command::new("sips")
+            .args([
+                "-z",
+                &double.to_string(),
+                &double.to_string(),
+                &input_png_path,
+                "--out",
+                &filename2x,
+            ])
+            .status()
+            .map_err(|e| format!("execute sips 2x failed: {}", e))?;
+        if !status1.success() || !status2.success() {
+            return Err("sips convert failed".into());
+        }
+    }
+    let icns_path = format!("{}/icon.icns", output_dir);
+    let status = Command::new("iconutil")
+        .args(["-c", "icns", &iconset_path, "-o", &icns_path])
+        .status()
+        .map_err(|e| format!("execute iconutil failed: {}", e))?;
+    if !status.success() {
+        return Err("iconutil convert failed".into());
+    }
+    let _ = fs::remove_file(&input_png_path);
+    let _ = fs::remove_dir_all(&iconset_path);
     Ok(())
 }

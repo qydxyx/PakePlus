@@ -301,7 +301,7 @@
                         &#xe66b;
                     </span>
                 </el-form-item>
-                <el-form-item :label="t('filterElements')" prop="desc">
+                <el-form-item :label="t('filterElements')" prop="filterCss">
                     <el-input
                         v-model="store.currentProject.filterCss"
                         type="textarea"
@@ -321,9 +321,10 @@
                         autoCapitalize="off"
                         autoCorrect="off"
                         spellCheck="false"
-                        disabled
+                        :disabled="!isDev"
                         :rows="3"
                         :placeholder="t('desTips')"
+                        @input="validateNoNewlines"
                     />
                 </el-form-item>
             </el-form>
@@ -431,7 +432,7 @@
                         <el-input
                             v-model="store.currentProject.desktop.pubBody"
                             type="textarea"
-                            disabled
+                            :disabled="!isDev"
                             autocomplete="off"
                             autoCapitalize="off"
                             autoCorrect="off"
@@ -583,6 +584,8 @@ import {
     createIssue,
     checkLastPublish,
     fileLimitNumber,
+    isDev,
+    readStaticFile,
 } from '@/utils/common'
 import { arch, platform } from '@tauri-apps/plugin-os'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -933,7 +936,7 @@ const confirmIcon = (base64Data: string) => {
     const image = new Image()
     image.src = base64Data
     image.onload = () => {
-        roundIcon.value = cropImageToRound(image)
+        roundIcon.value = cropImageToRound(image, 50)
     }
 }
 
@@ -1320,6 +1323,15 @@ const saveFormInput = async () => {
     }
 }
 
+// validate no newlines
+const validateNoNewlines = () => {
+    const desc = store.currentProject.desktop.desc
+    if (desc && (desc.includes('\n') || desc.includes('\r'))) {
+        oneMessage.error('描述不能包含换行符')
+        store.currentProject.desktop.desc = desc.replace(/[\n\r]/g, '')
+    }
+}
+
 // save project
 const saveProject = async (tips: boolean = true) => {
     // await emit('handlepay', { loggedIn: true, token: 'authToken' })
@@ -1349,9 +1361,15 @@ const saveProject = async (tips: boolean = true) => {
 }
 
 // get initialization_script(customJs+cssfilter+jsfile)
-const getInitializationScript = () => {
+const getInitializationScript = async (isdebug: boolean = false) => {
+    let initJsScript = ''
+    // read static file
+    if (isdebug) {
+        const vconsoleJs = await readStaticFile('vconsole.min.js')
+        initJsScript += vconsoleJs + '\n'
+    }
     // creat css filter content
-    let initJsScript = store.currentProject.customJs
+    initJsScript += store.currentProject.customJs
     if (store.currentProject.filterCss !== '') {
         const cssFilterContent = store.currentProject.filterCss
             .split(';')
@@ -1416,12 +1434,12 @@ const preview = async (resize: boolean) => {
         }
         store.setPreviewPath(store.currentProject.htmlPath)
         // if platform is macos, then use tauri preview
-        appFormRef.value?.validate((valid, fields) => {
+        appFormRef.value?.validate(async (valid, fields) => {
             if (valid) {
                 console.log('submit!', store.currentProject.more.windows)
                 saveProject(false)
                 // initialization_script
-                const initJsScript = getInitializationScript()
+                const initJsScript = await getInitializationScript()
                 console.log('initCssScript', initJsScript)
                 invoke('preview_from_config', {
                     resize,
@@ -1469,49 +1487,8 @@ const buildLoading = ref(false)
 let buildTime = 0
 let buildStatus = t('startCompile') + '...'
 let buildSecondTimer: any = null
+const buildRate = ref(0)
 let checkDispatchTimer: any = null
-
-// update build.yml file content
-const updateBuildYml = async () => {
-    loadingText(t('syncConfig') + 'action...')
-    // get build.yml file sha
-    const shaRes: any = await githubApi.getFileSha(
-        store.userInfo.login,
-        'PakePlus',
-        '.github/workflows/build.yml',
-        {
-            ref: store.currentProject.name,
-        }
-    )
-    console.log('get build.yml file sha', shaRes)
-    if (shaRes.status === 200 || shaRes.status === 404) {
-        // get build.yml file content
-        const content = await getBuildYmlFetch({
-            repo: 'PakePlus',
-            name: store.currentProject.name,
-            body: pubForm.desc,
-        })
-        // update build.yml file content
-        const updateRes: any = await githubApi.updateBuildYmlFile(
-            store.userInfo.login,
-            'PakePlus',
-            {
-                message: 'update build.yml from pakeplus',
-                content: content,
-                sha: shaRes.data.sha,
-                branch: store.currentProject.name,
-            }
-        )
-        if (updateRes.status === 200) {
-            console.log('updateBuildYml', updateRes)
-            loadingText(t('syncConfig') + '...')
-        } else {
-            console.error('updateBuildYml error', updateRes)
-        }
-    } else {
-        console.error('getFileSha error', shaRes)
-    }
-}
 
 // update build.yml file content
 const updatePPconfig = async () => {
@@ -1567,7 +1544,7 @@ const updateCustomJs = async () => {
     console.log('get custom file sha', shaRes)
     if (shaRes.status === 200 || shaRes.status === 404) {
         // get CargoToml file content
-        const initJsScript = getInitializationScript()
+        const initJsScript = await getInitializationScript()
         const jsFileContent: any = await base64Encode(initJsScript)
         const updateRes: any = await githubApi.updateCustomJsFile(
             store.userInfo.login,
@@ -1588,72 +1565,63 @@ const updateCustomJs = async () => {
     }
 }
 
-// update tauri.conf.json
-const updateTauriConfig = async () => {
-    loadingText(t('syncConfig') + 'tauri...')
-    // update tauri config json
-    const configSha: any = await githubApi.getFileSha(
-        store.userInfo.login,
-        'PakePlus',
-        'src-tauri/tauri.conf.json',
-        {
-            ref: store.currentProject.name,
-        }
-    )
-    try {
-        // remove label from windows
-        let { label, ...newWindows } = store.currentProject.more.windows
-        const configContent: any = await getTauriConfFetch({
-            name: store.currentProject.showName,
-            version: store.currentProject.version,
-            id: store.currentProject.appid,
-            ascii: isAlphanumeric(store.currentProject.showName),
-            windowConfig: JSON.stringify(newWindows),
-            tauriApi: store.currentProject.tauriApi,
-            isHtml: store.currentProject.isHtml,
-        })
-        // update config file
-        const updateRes: any = await githubApi.updateConfigFile(
-            store.userInfo.login,
-            'PakePlus',
-            {
-                message: 'update config from pakeplus',
-                content: configContent,
-                sha: configSha.data.sha,
-                branch: store.currentProject.name,
-            }
-        )
-        if (updateRes.status === 200) {
-            loadingText(t('syncConfig') + '...')
-        }
-    } catch (error) {
-        console.error('Error reading JSON file:', error)
-    }
-}
+listen('local-progress', (event: any) => {
+    buildRate.value = parseInt(event.payload)
+})
 
 // local publish
 const easyLocal = async () => {
-    console.log('easyLocal')
     const targetDir = savePath.value || (await downloadDir())
+    loadingText(t('syncConfig') + '...')
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+    buildSecondTimer = setInterval(() => {
+        buildTime += 1
+        const minute = Math.floor(buildTime / 60)
+        const second = buildTime % 60
+        buildRate.value = Math.floor(buildRate.value + buildTime / 10)
+        // loadingText.value = `${buildStatus}...${minute}分${second}秒`
+        const loadingState = `<div>${minute}${t('minute')}${second}${t(
+            'second'
+        )}</div><div>${buildStatus}${
+            buildRate.value > 99 ? 99 : buildRate.value
+        }%</div>`
+        // console.log('loadingText---', loadingText)
+        loadingText(loadingState)
+    }, 1000)
     // build local
+    // store.currentProject.isHtml && store.currentProject.htmlPath
     invoke('build_local', {
         targetDir: targetDir,
         exeName: store.currentProject.showName,
         config: store.currentProject.more.windows,
+        base64Png:
+            platformName === 'macos'
+                ? store.currentProject.iconRound
+                    ? roundIcon.value
+                    : store.currentProject.icon
+                : store.currentProject.icon,
+        debug: store.currentProject.desktop.debug,
+        customJs: await getInitializationScript(true),
+        htmlPath: store.currentProject.htmlPath,
     })
+        .then((res) => {
+            console.log('build_local1 res', res)
+            loadingText(t('buildSuccess'))
+            oneMessage.success('本地打包成功')
+            buildLoading.value = false
+        })
+        .catch((error) => {
+            console.error('build_local2 error', error)
+            oneMessage.error(error)
+            warning.value = '本地打包失败' + ': ' + error
+        })
+        .finally(() => {
+            buildSecondTimer && clearInterval(buildSecondTimer)
+        })
 }
 
 // new publish version
 const publishWeb = async () => {
-    //  else if (store.currentProject.platform.length === 0) {
-    //     oneMessage.error(t('selectPlatform'))
-    //     return
-    // }
-    const now = new Date()
-    localStorage.setItem('lastClickTime', now.toISOString())
-    centerDialogVisible.value = false
-    buildLoading.value = true
-    loadingText(t('preCheck') + '...')
     try {
         // delete release
         store.isRelease && (await store.deleteRelease())
@@ -1678,6 +1646,9 @@ const publishWeb = async () => {
         buildTime = 0
         loadingText(t('failure'))
         buildLoading.value = false
+        const now = new Date()
+        const futureTime = new Date(now.getTime() + 50 * 60 * 1000)
+        localStorage.setItem('lastClickTime', futureTime.toISOString())
         createIssue(
             store.currentProject.name,
             store.currentProject.showName,
@@ -1699,16 +1670,24 @@ const publishWeb = async () => {
 
 // publish check
 const publishCheck = async () => {
+    centerDialogVisible.value = false
+    buildLoading.value = true
+    buildRate.value = 0
+    buildTime = 0
+    loadingText(t('preCheck') + '...')
+    await new Promise((resolve) => setTimeout(resolve, 3000))
     if (store.currentProject.desktop.buildMethod === 'local') {
         await easyLocal()
     } else if (store.token === '') {
         oneMessage.error(t('configToken'))
         return
-    } else if (checkLastPublish()) {
-        oneMessage.error(t('limitProject'))
-        return
     } else {
-        publishWeb()
+        if (checkLastPublish()) {
+            oneMessage.error(t('limitProject'))
+            return
+        } else {
+            publishWeb()
+        }
     }
 }
 
@@ -1836,6 +1815,8 @@ const checkBuildStatus = async () => {
                 'build success',
                 'PakePlus'
             )
+            const now = new Date()
+            localStorage.setItem('lastClickTime', now.toISOString())
             await new Promise((resolve) => setTimeout(resolve, 3000))
             store.setCurrentRelease()
             loadingText(t('buildSuccess'))
@@ -1933,7 +1914,7 @@ onMounted(async () => {
         // initJsFileContents()
         const window = getCurrentWindow()
         window.setTitle(`${store.currentProject.name}`)
-        methodChange('local')
+        methodChange(store.currentProject.desktop.buildMethod)
     }
     console.log('route.query', route.query)
     const delrelease = route.query.delrelease

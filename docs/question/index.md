@@ -8,6 +8,7 @@
 4. 是否有在群里咨询过，没有的话，先在群里问问试试，[进群交流](../exchange/index.md)
 5. 网络问题请检查是否使用了代理或者云电脑等，可以尝试切换网络试试。
 6. 如果某些功能没有支持，可以通过赞助 PP 快速优先开发解决。
+7. windows用户请卸载掉流氓软件，比如360等国产监控软件，否则遇到问题请自己解决
 
 # mac 提示 应用已随坏
 
@@ -47,8 +48,8 @@ arm64 位下载下面两个结尾的文件：
 
 原因：[https://v2.tauri.app/reference/config/#dragdropenabled](https://v2.tauri.app/reference/config/#dragdropenabled)  
 解决办法：  
-mac平台: 在更多配置中，关闭 dragDropEnabled 选项，然后重新打包。
-windows平台: 在更多配置中，开启 dragDropEnabled 选项，然后重新打包。
+mac 平台: 在更多配置中，关闭 dragDropEnabled 选项，然后重新打包。
+windows 平台: 在更多配置中，开启 dragDropEnabled 选项，然后重新打包。
 
 # 打包后白屏或报错
 
@@ -68,6 +69,8 @@ windows平台: 在更多配置中，开启 dragDropEnabled 选项，然后重新
 确认 token 权限是否配置正确，然后重新填入 token 试试，往往是 token 权限配置错误导致的。或者点击首页头像然后同步一下试试。
 
 # Cannot read properties of undefined XXX
+
+> PakePlus publish action error undefined 等等问题
 
 用最新版本的 PakePlus，然后填入 token 试试，能解决 99%的问题。或者点击首页头像然后同步一下试试。
 

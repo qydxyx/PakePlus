@@ -5,6 +5,7 @@
     "type": "module",
     "scripts": {
         "tauri dev": "tauri dev",
+        "tauri build": "tauri build",
         "tauri debug": "tauri build --debug",
         "docs:dev": "vitepress dev docs",
         "docs:build": "vitepress build docs",
@@ -13,7 +14,6 @@
         "build": "vue-tsc --noEmit && vite build",
         "preview": "vite preview",
         "icon": "tauri icon",
-        "tauri build": "tauri build",
         "tauri preview": "tauri preview",
         "update tauri": "cd src-tauri && cargo update"
     },
@@ -43,7 +43,6 @@
         "pinia": "^2.2.2",
         "qrcode": "^1.5.4",
         "sass-loader": "^16.0.1",
-        "vconsole": "^3.15.1",
         "vue": "^3.3.4",
         "vue-codemirror": "^6.1.1",
         "vue-cropper": "^1.1.4",

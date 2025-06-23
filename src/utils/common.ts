@@ -347,15 +347,15 @@ export const base64Decode = (str: string) => {
 }
 
 // read file
-export const readFile = async (fileName: string) => {
+export const readStaticFile = async (fileName: string) => {
     try {
         const response = await fetch(`/${fileName}`)
         if (!response.ok) {
-            throw new Error('readFile error')
+            throw new Error('readStaticFile error')
         }
         return response.text()
     } catch (error) {
-        console.error('readFile error', error)
+        console.error('readStaticFile error', error)
         return 'error'
     }
 }
@@ -366,7 +366,7 @@ export const updateBuildFile = async (data: any) => {
         const content = await invoke('update_build_file', data)
         return content
     } else {
-        let content = await readFile('build.yml')
+        let content = await readStaticFile('build.yml')
         if (content === 'error') {
             return 'error'
         }
@@ -394,7 +394,7 @@ export const getCustomJs = async () => {
         const content = await invoke('get_custom_js')
         return content
     } else {
-        let content = await readFile('custom.js')
+        let content = await readStaticFile('custom.js')
         if (content === 'error') {
             return 'error'
         }
@@ -404,7 +404,7 @@ export const getCustomJs = async () => {
 
 // get custom js
 export const getCustomJsFetch = async () => {
-    let content = await readFile('custom.js')
+    let content = await readStaticFile('custom.js')
     if (content === 'error') {
         return 'error'
     }
@@ -417,7 +417,7 @@ export const getBuildYml = async (params: any) => {
         const content = await invoke('update_build_file', params)
         return content
     } else {
-        let content = await readFile('build.yml')
+        let content = await readStaticFile('build.yml')
         if (content === 'error') {
             return 'error'
         }
@@ -431,7 +431,7 @@ export const getBuildYml = async (params: any) => {
 
 // get ppconfig.json file content
 export const getPpconfig = async (params: any) => {
-    let content = await readFile('ppconfig.json')
+    let content = await readStaticFile('ppconfig.json')
     if (content === 'error') {
         return 'error'
     }
@@ -440,7 +440,7 @@ export const getPpconfig = async (params: any) => {
 // get build.yml file content
 export const getBuildYmlFetch = async (params: any) => {
     // 因为工作流文件不用更新，所以这里直接读取build.yml
-    let content = await readFile('build.yml')
+    let content = await readStaticFile('build.yml')
     if (content === 'error') {
         return 'error'
     }
@@ -457,7 +457,7 @@ export const getCargoToml = async (params: any) => {
         const content = await invoke('update_cargo_file', params)
         return content
     } else {
-        let content = await readFile('cargo.txt')
+        let content = await readStaticFile('cargo.txt')
         if (content === 'error') {
             return 'error'
         }
@@ -478,7 +478,7 @@ export const getCargoToml = async (params: any) => {
 
 // get Cargo.toml file content
 export const getCargoTomlFetch = async (params: any) => {
-    let content = await readFile('cargo.txt')
+    let content = await readStaticFile('cargo.txt')
     if (content === 'error') {
         return 'error'
     }
@@ -510,7 +510,7 @@ export const getTauriConf = async (params: any) => {
         const content = await invoke('update_config_file', params)
         return content
     } else {
-        let content = await readFile('config.json')
+        let content = await readStaticFile('config.json')
         if (content === 'error') {
             return 'error'
         }
@@ -535,7 +535,7 @@ export const getTauriConf = async (params: any) => {
 
 // get tauri.conf.json file content
 export const getTauriConfFetch = async (params: any) => {
-    let content = await readFile('config.json')
+    let content = await readStaticFile('config.json')
     if (content === 'error') {
         return 'error'
     }
@@ -575,7 +575,7 @@ export const getInitRust = async (params: any) => {
         const content = await invoke('update_init_rs', params)
         return content
     } else {
-        let content = await readFile('init.txt')
+        let content = await readStaticFile('init.txt')
         if (content === 'error') {
             return 'error'
         }
@@ -598,7 +598,7 @@ export const getInitRust = async (params: any) => {
 
 // get init.rs file content
 export const getLibRsFetch = async (params: any) => {
-    let content = await readFile('lib.txt')
+    let content = await readStaticFile('lib.txt')
     if (content === 'error') {
         return 'error'
     }
@@ -627,7 +627,7 @@ export const getInitRustFetch = async (params: any) => {
     }
     console.log('getInitRust params', params.config)
     params.config = JSON.stringify(params.config)
-    let content = await readFile('init.txt')
+    let content = await readStaticFile('init.txt')
     if (content === 'error') {
         return 'error'
     }
@@ -671,55 +671,72 @@ export const arrayBufferToBase64 = (buffer: Uint8Array) => {
     return btoa(binary)
 }
 
-// 绘制苹果风格圆角路径
-const drawAppleStylePath = (ctx: any, width: number, height: number) => {
-    const radius = Math.min(width, height) * 0.15 // 圆角半径比例
-    const controlOffset = radius * 0.55 // 控制点偏移量
+// 绘制标准圆角路径（类似Sharp的效果）
+const drawAppleStylePath = (
+    ctx: any,
+    width: number,
+    height: number,
+    padding: number = 0
+) => {
+    const effectiveWidth = width - 2 * padding
+    const effectiveHeight = height - 2 * padding
+    // 调整圆角半径为宽高的25%（与Sharp版本中的250/1024≈24.4%接近）
+    const radius = Math.min(effectiveWidth, effectiveHeight) * 0.24
+
+    // 使用标准的90度圆弧（控制点偏移量为半径的0.55228475）
+    const controlOffset = radius * 0.55228475
 
     ctx.beginPath()
 
     // 左上角
-    ctx.moveTo(radius, 0)
-    ctx.bezierCurveTo(controlOffset, 0, 0, controlOffset, 0, radius)
+    ctx.moveTo(padding + radius, padding)
+    ctx.bezierCurveTo(
+        padding + controlOffset,
+        padding,
+        padding,
+        padding + controlOffset,
+        padding,
+        padding + radius
+    )
 
     // 左下角
-    ctx.lineTo(0, height - radius)
+    ctx.lineTo(padding, padding + effectiveHeight - radius)
     ctx.bezierCurveTo(
-        0,
-        height - controlOffset,
-        controlOffset,
-        height,
-        radius,
-        height
+        padding,
+        padding + effectiveHeight - controlOffset,
+        padding + controlOffset,
+        padding + effectiveHeight,
+        padding + radius,
+        padding + effectiveHeight
     )
 
     // 右下角
-    ctx.lineTo(width - radius, height)
+    ctx.lineTo(padding + effectiveWidth - radius, padding + effectiveHeight)
     ctx.bezierCurveTo(
-        width - controlOffset,
-        height,
-        width,
-        height - controlOffset,
-        width,
-        height - radius
+        padding + effectiveWidth - controlOffset,
+        padding + effectiveHeight,
+        padding + effectiveWidth,
+        padding + effectiveHeight - controlOffset,
+        padding + effectiveWidth,
+        padding + effectiveHeight - radius
     )
 
     // 右上角
-    ctx.lineTo(width, radius)
+    ctx.lineTo(padding + effectiveWidth, padding + radius)
     ctx.bezierCurveTo(
-        width,
-        controlOffset,
-        width - controlOffset,
-        0,
-        width - radius,
-        0
+        padding + effectiveWidth,
+        padding + controlOffset,
+        padding + effectiveWidth - controlOffset,
+        padding,
+        padding + effectiveWidth - radius,
+        padding
     )
 
     ctx.closePath()
 }
 
 // 使用 Canvas 裁剪图片为圆角
-export const cropImageToRound = (image: any) => {
+export const cropImageToRound = (image: any, padding: number = 0) => {
     const canvas = document.createElement('canvas')
     const ctx: any = canvas.getContext('2d')
 
@@ -727,12 +744,24 @@ export const cropImageToRound = (image: any) => {
     canvas.width = image.width
     canvas.height = image.height
 
-    // 绘制苹果风格圆角路径
-    drawAppleStylePath(ctx, canvas.width, canvas.height)
+    // 透明背景
+    ctx.fillStyle = 'rgba(0, 0, 0, 0)'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    // 绘制圆角路径
+    drawAppleStylePath(ctx, canvas.width, canvas.height, padding)
 
     // 裁剪图片
+    ctx.save()
     ctx.clip()
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+    ctx.drawImage(
+        image,
+        padding,
+        padding,
+        canvas.width - 2 * padding,
+        canvas.height - 2 * padding
+    )
+    ctx.restore()
 
     // 将裁剪后的图片转换为 Base64
     return canvas.toDataURL('image/png')
@@ -903,7 +932,7 @@ export const createBranch = async (
 // creat build yml
 // const uploadBuildYml = async (_: string = 'main') => {
 //     // get build.yml file content
-//     // const content = await readFile('build.yml')
+//     // const content = await readStaticFile('build.yml')
 //     const content = await updateBuildFile({
 //         name: 'PakePlus',
 //         body: 'This is a workflow to help you automate the publishing of your PakePlus project to GitHub Packages.',
